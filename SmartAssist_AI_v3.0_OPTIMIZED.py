@@ -554,24 +554,12 @@ if uploaded_file:
 
 else:
     # LANDING PAGE
-    # LANDING PAGE
     st.info("👆 Silakan unggah data untuk memulai analisis.")
-    # Reverting to st.image because Base64 crashes on large files (30MB+)
-    # Note: If the GIF does not play, it might be due to the large file size taking time to load in the browser.
-    
-    import os
-    import base64
-    
-    local_gif = "Smart Assist ai (2) dengan latar belakang putih.gif"
-    
-    if os.path.exists(local_gif):
-        with open(local_gif, "rb") as f:
-            data = f.read()
-            data_url = base64.b64encode(data).decode("utf-8")
-        
-        st.markdown(
-            f'<div style="text-align: center;"><img src="data:image/gif;base64,{data_url}" alt="Smart Assist AI" style="max-width: 100%;"></div>',
-            unsafe_allow_html=True,
-        )
-    else:
-        st.error(f"File '{local_gif}' tidak ditemukan di folder sama dengan script.")
+
+    gif_url = "https://raw.githubusercontent.com/USER/REPO/branch/path/to/SmartAssist.gif"
+
+    st.markdown(
+        f'<div style="text-align: center;"><img src="{gif_url}" '
+        'alt="Smart Assist AI" style="max-width: 100%;"></div>',
+        unsafe_allow_html=True,
+    )
