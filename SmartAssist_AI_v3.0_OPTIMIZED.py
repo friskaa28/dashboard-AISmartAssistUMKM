@@ -556,7 +556,7 @@ else:
     # LANDING PAGE
     st.info("👆 Silakan unggah data untuk memulai analisis.")
 
-    gif_url = "https://raw.githubusercontent.com/USER/REPO/branch/path/to/SmartAssist.gif"
+    gif_url = "https://raw.githubusercontent.com/friskaa28/dashboard-AISmartAssistUMKM/master/Smart%20Assist%20ai%20(2)%20dengan%20latar%20belakang%20putih.gif"
 
     st.markdown(
         f'<div style="text-align: center;"><img src="{gif_url}" '
