@@ -262,6 +262,14 @@ class ExpertSystem:
             return "Data Tanggal Order tidak tersedia untuk analisis waktu."
         df_time = self.df.copy()
         df_time['Tanggal Order'] = pd.to_datetime(df_time['Tanggal Order'], errors='coerce')
+        
+        # Hitung rentang tahun
+        valid_dates = df_time['Tanggal Order'].dropna()
+        if valid_dates.empty:
+            return "Data tanggal tidak valid."
+        min_year = valid_dates.dt.year.min()
+        max_year = valid_dates.dt.year.max()
+        year_range = f"{int(min_year)} - {int(max_year)}" if min_year != max_year else f"{int(min_year)}"
 
         monthly = df_time.groupby(df_time['Tanggal Order'].dt.month_name())['Total Penjualan'].sum()
         if monthly.empty:
@@ -271,21 +279,48 @@ class ExpertSystem:
         peak_val = monthly.max()
         peak_month_id = self._get_indonesian_month(peak_month_en)
         return (
-            f"⏰ Analisis Waktu (Prime Time):\n"
+            f"⏰ **Analisis Prime Time ({year_range})**:\n"
             f"- Bulan Puncak: {peak_month_id} (Tertinggi: {format_currency(peak_val)})\n\n"
-            f"💡 Strategi: Siapkan stok & promo menjelang bulan {peak_month_id}."
+            f"💡 **Catatan**: Data ini adalah akumulasi total penjualan dari tahun {year_range} untuk melihat tren musiman bisnis Anda."
         )
 
-    def analyze_customers(self):
+    def analyze_customers(self, metric='Total Penjualan', top=True):
         if 'Cust' not in self.df.columns:
             return "Data Customer tidak tersedia."
-        cust_counts = self.df['Cust'].value_counts()
-        top_cust = self.df.groupby('Cust')['Total Penjualan'].sum().nlargest(1).index[0]
+        
+        # Group by customer and aggregate
+        cust_stats = self.df.groupby('Cust').agg({
+            'Total Penjualan': 'sum',
+            'Qty': 'sum'
+        })
+        
+        if cust_stats.empty:
+            return "Data customer kosong."
+
+        # Sort based on metric and order
+        is_qty = 'Qty' in metric
+        sort_col = 'Qty' if is_qty else 'Total Penjualan'
+        
+        # Get target customer
+        if top:
+            target_row = cust_stats.nlargest(1, sort_col)
+            label = "tertinggi"
+        else:
+            target_row = cust_stats.nsmallest(1, sort_col)
+            label = "terendah"
+            
+        target_cust = target_row.index[0]
+        target_val = target_row[sort_col].values[0]
+        
+        metric_label = "Jumlah Barang (Qty)" if is_qty else "Total Pendapatan"
+        val_display = f"{target_val:,} unit" if is_qty else format_currency(target_val)
+
         return (
-            f"👥 Profil Pelanggan:\n"
-            f"- Total Pelanggan Unik: {len(cust_counts)}\n"
-            f"- Top Customer: {top_cust}\n\n"
-            f"💡 Tips: Cek tab Customer untuk lihat reseller (Qty > 10 atau Frequency > 5)."
+            f"👥 **Analisis Pelanggan ({label.capitalize()})**:\n"
+            f"- Berdasarkan: {metric_label}\n"
+            f"- Nama Customer: **{target_cust}**\n"
+            f"- Nilai: {val_display}\n\n"
+            f"💡 **Info**: Total pelanggan unik saat ini adalah {len(cust_stats)} orang."
         )
 
     def analyze_geography(self):
@@ -483,7 +518,12 @@ class ExpertSystem:
             return self.analyze_primetime()
 
         # ---- customers ----
-        if re.search(r'\b(customer|cust|pelanggan|pembeli|reseller|loyal|terbaik|paling sering)\b', q):
+        if re.search(r'\b(customer|cust|pelanggan|pembeli|reseller|loyal|terbaik|terendah|tertinggi|paling sedikit|paling banyak|paling sering)\b', q):
+            # Check for metric (Qty vs Sales)
+            metric = 'Qty' if re.search(r'\b(qty|jumlah|unit)\b', q) else 'Total Penjualan'
+            # Check for order (Highest vs Lowest)
+            is_top = not re.search(r'\b(terendah|paling sedikit|sepi|kecil|minimal|bottom)\b', q)
+            
             if re.search(r'\b(reseller)\b', q) and 'Cust' in self.df.columns:
                 cust_stats = self.df.groupby('Cust').agg({'Total Penjualan': 'sum','Qty': 'sum','Pesanan': 'count'}).rename(columns={'Pesanan':'Frequency'})
                 reseller = cust_stats[(cust_stats['Qty'] > 10) | (cust_stats['Frequency'] > 5)].sort_values('Total Penjualan', ascending=False)
@@ -491,7 +531,7 @@ class ExpertSystem:
                     return "Belum terlihat reseller kuat dari aturan sederhana (Qty>10 atau Frequency>5)."
                 top = reseller.head(5).index.tolist()
                 return "💎 Reseller potensial (Top 5):\n- " + "\n- ".join(top) + "\n\n💡 Beri harga khusus / paket grosir."
-            return self.analyze_customers()
+            return self.analyze_customers(metric=metric, top=is_top)
 
         # ---- geography ----
         if re.search(r'\b(peta|lokasi|daerah|kota|wilayah|geo|geografi|pasar terbesar)\b', q):
@@ -525,18 +565,18 @@ class ExpertSystem:
             return self.analyze_forecast()
 
         # ---- DKK / DKS specific strategies ----
-        if re.search(r'\b(dkk|keratonian)\b', q):
+        if re.search(r'\b(dkk|kerucut|dks|standar|stik|perbedaan|apa bedanya)\b', q):
             return (
-                "🛡️ **Strategi DKK (Keratonian)**:\n"
-                "Produk ini adalah premium target. Pastikan visual iklan terlihat eksklusif.\n"
-                "💡 Saran: Gunakan influencer niche atau branding yang menekankan kualitas bahan."
-            )
-            
-        if re.search(r'\b(dks|standar)\b', q):
-            return (
-                "📦 **Strategi DKS (Standard)**:\n"
-                "Produk ini bersifat mass-market. Fokus pada volume penjualan.\n"
-                "💡 Saran: Buat promo 'Beli 3 Lebih Hemat' atau bundling dengan produk best seller lainnya."
+                "🛡️ **Perbedaan DKK vs DKS**:\n\n"
+                "1. **DKK (Dupa Keratonian Kerucut)**:\n"
+                "- **Target**: Pasar Premium/Eksklusif.\n"
+                "- **Fokus**: Branding kualitas bahan, kemasan mewah, dan margin tinggi.\n"
+                "- **Strategi**: Gunakan influencer niche dan iklan visual estetis.\n\n"
+                "2. **DKS (Dupa Keratonian Stik)**:\n"
+                "- **Target**: Pasar Massal (Mass-Market).\n"
+                "- **Fokus**: Volume penjualan tinggi dan harga kompetitif.\n"
+                "- **Strategi**: Promo 'Beli Banyak Lebih Hemat' (Wholesale) dan distribusi luas.\n\n"
+                "💡 **Ringkasan**: DKK untuk *Quality*, DKS untuk *Quantity*."
             )
 
         # ---- qty / volume ----
@@ -788,7 +828,7 @@ if uploaded_file:
                     bs = df_display.groupby('Pesanan').agg({'Qty':'sum','Total Penjualan':'sum'}).reset_index().sort_values('Total Penjualan', ascending=False).head(15)
                     # Convert to JT for display
                     bs['Total Penjualan JT'] = bs['Total Penjualan'] / 1_000_000
-                    fig = px.bar(bs, x='Total Penjualan JT', y='Pesanan', orientation='h', color='Pesanan', title=f"Top 15 Produk - {filter_mode}", text_auto=True)
+                    fig = px.bar(bs, x='Total Penjualan JT', y='Pesanan', orientation='h', color='Pesanan', title=f"Top Produk - {filter_mode}", text_auto=True)
                     fig.update_layout(showlegend=False, xaxis_title="Total Penjualan (JT Rupiah)", yaxis_title="Pesanan", paper_bgcolor=current_theme['card'], plot_bgcolor=current_theme['card'], font=dict(color=current_theme['text']))
                     st.plotly_chart(fig, use_container_width=True)
                 else:
@@ -809,6 +849,16 @@ if uploaded_file:
         # TAB 3: PRIME TIME
         with tabs[2]:
             if 'Tanggal Order' in df.columns:
+                # Hitung rentang tahun untuk informasi user
+                df_time = df.copy()
+                df_time['Tanggal Order'] = pd.to_datetime(df_time['Tanggal Order'], errors='coerce')
+                valid_dates = df_time['Tanggal Order'].dropna()
+                if not valid_dates.empty:
+                    min_year = valid_dates.dt.year.min()
+                    max_year = valid_dates.dt.year.max()
+                    year_range = f"{int(min_year)} - {int(max_year)}" if min_year != max_year else f"{int(min_year)}"
+                    st.info(f"💡 **Info**: Grafik ini menunjukkan akumulasi penjualan bulanan dari rentang tahun **{year_range}**. Ini membantu Anda melihat pola musiman (Prime Time) bisnis Anda agar bisa menyiapkan stok lebih awal.")
+
                 df['Month'] = df['Tanggal Order'].dt.month_name()
                 monthly = df.groupby('Month')['Total Penjualan'].sum()
                 st.line_chart(monthly, color=current_theme['accent'])
@@ -837,13 +887,13 @@ if uploaded_file:
             st.subheader("Peta Distribusi")
             
             # 1. Filter Logic
-            geo_filter = st.radio("Filter Peta:", ["Semua Item", "DKK (Keratonian)", "DKS (Standard)"], horizontal=True, key="geo_filter")
+            geo_filter = st.radio("Filter Peta:", ["Semua Item", "DKK (Kerucut)", "DKS (Stik)"], horizontal=True, key="geo_filter")
             
             df_geo = df.copy()
             if 'Daerah' in df_geo.columns:
-                if geo_filter == "DKK (Keratonian)":
+                if geo_filter == "DKK (Kerucut)":
                     df_geo = df_geo[df_geo['Pesanan'].str.contains('DKK', na=False, case=False)]
-                elif geo_filter == "DKS (Standard)":
+                elif geo_filter == "DKS (Stik)":
                     df_geo = df_geo[df_geo['Pesanan'].str.contains('DKS', na=False, case=False)]
 
                 # 2. Coordinate Mapping
@@ -854,9 +904,9 @@ if uploaded_file:
                 # 3. Coloring Logic (DKK = Pekat/Dark, DKS = Terang/Light)
                 # We achieve this by picking different color scales
                 # DKK -> Dark Blue to Purple. DKS -> Light Blue to Cyan.
-                if geo_filter == "DKK (Keratonian)":
+                if geo_filter == "DKK (Kerucut)":
                     color_continuous_scale = px.colors.sequential.Viridis # Darker palette
-                elif geo_filter == "DKS (Standard)":
+                elif geo_filter == "DKS (Stik)":
                     color_continuous_scale = px.colors.sequential.PuBu # Lighter palette
                 else:
                     color_continuous_scale = px.colors.sequential.Plasma
