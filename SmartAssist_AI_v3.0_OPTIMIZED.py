@@ -12,14 +12,20 @@ from sklearn.feature_extraction.text import TfidfVectorizer
 import matplotlib.pyplot as plt
 import seaborn as sns
 import plotly.express as px
-from datetime import datetime
 import re
+import google.generativeai as genai
 import warnings
 
 warnings.filterwarnings('ignore')
 
+# 🔑 CONFIGURATION (Bisa diisi langsung di sini atau via UI)
+GEMINI_API_KEY = "AIzaSyC8WHWXUPO9ZiYoHB7rBSuUQ8IspvjgIM4" # Masukkan API Key Anda di sini
+
 def format_currency(value):
-    return f"Rp {value/1_000_000:,.1f} JT"
+    if value >= 1_000_000:
+        return f"Rp {value/1_000_000:,.1f} JT"
+    else:
+        return f"Rp {value:,.0f}"
 
 # ═══════════════════════════════════════════════════════════════
 # 🎨 PAGE CONFIG & THEME
@@ -37,6 +43,8 @@ if "theme" not in st.session_state:
     st.session_state.theme = "light"
 if "show_expert_panel" not in st.session_state:
     st.session_state.show_expert_panel = False 
+if "gemini_api_key" not in st.session_state:
+    st.session_state.gemini_api_key = GEMINI_API_KEY
 if "chat_history" not in st.session_state:
     st.session_state.chat_history = [
         {"role": "assistant", "content": "Halo! 👋 Saya Asisten AI untuk UMKM yang siap bantu kamu.\nAku bisa bantu jelasin:\n✅ Produk apa yang lagi best seller\n✅ Kapan waktu terbaik buat jualan (Prime Time)\n✅ Siapa aja pelanggan setiamu\n✅ Prediksi penjualan ke depan\n✅ Kondisi stok gudang\n\nTanya aja apa yang mau kamu tau!"}
@@ -148,6 +156,7 @@ st.markdown(f"""
 </style>
 """, unsafe_allow_html=True)
 
+
 # ═══════════════════════════════════════════════════════════════
 # 🧠 INTELLIGENT BACKEND
 # ═══════════════════════════════════════════════════════════════
@@ -169,6 +178,9 @@ class ExpertSystem:
 
     def generate_detailed_insights(self):
         insights = []
+        if 'Total Penjualan' not in self.df.columns:
+            return insights, pd.DataFrame()
+            
         total_sales = self.df['Total Penjualan'].sum()
         insights.append({"type": "info", "text": f"Revenue: **Rp {total_sales:,.0f}**"})
         
@@ -200,109 +212,372 @@ class ExpertSystem:
 
         return insights, product_stats
 
-    # ✅ UPDATED: Complete Chatbot Logic
     def analyze_overview(self):
         total_rev = self.df['Total Penjualan'].sum()
         total_order = len(self.df)
         total_prod = self.df['Pesanan'].nunique()
-        return f"📊 **Ringkasan Bisnis**:\n- Total Pendapatan: {format_currency(total_rev)}\n- Total Transaksi: {total_order}\n- Variasi Produk: {total_prod} Item\n\nBisnis Anda berjalan aktif! Cek tab lain untuk detail lebih dalam."
+        return (
+            f"📊 **Ringkasan Bisnis**:\n"
+            f"- Total Pendapatan: {format_currency(total_rev)}\n"
+            f"- Total Transaksi: {total_order}\n"
+            f"- Variasi Produk: {total_prod} Item\n\n"
+            f"Bisnis Anda berjalan aktif! Cek tab lain untuk detail lebih dalam."
+        )
 
     def analyze_bestsellers(self):
-        if 'Pesanan' not in self.df.columns: return "Data Pesanan tidak tersedia."
+        if 'Pesanan' not in self.df.columns:
+            return "Data Pesanan tidak tersedia."
         top_prod = self.df.groupby('Pesanan')['Total Penjualan'].sum().nlargest(3)
         msg = "🏆 Produk Unggulan (Top 3):\n"
         for i, (name, val) in enumerate(top_prod.items(), 1):
             msg += f"{i}. {name} ({format_currency(val)})\n"
-        
         msg += "\n💡 **Saran**: Pastikan stok produk ini selalu aman karena berkontribusi terbesar pada omset."
         return msg
 
     def analyze_primetime(self):
-        if 'Tanggal Order' not in self.df.columns: return "Data Tanggal Order tidak tersedia untuk analisis waktu."
-        
-        # Ensure datetime
+        if 'Tanggal Order' not in self.df.columns:
+            return "Data Tanggal Order tidak tersedia untuk analisis waktu."
         df_time = self.df.copy()
         df_time['Tanggal Order'] = pd.to_datetime(df_time['Tanggal Order'], errors='coerce')
-        
-        # Monthly Peak
+
         monthly = df_time.groupby(df_time['Tanggal Order'].dt.month_name())['Total Penjualan'].sum()
-        if monthly.empty: return "Data waktu tidak cukup."
-        
-        peak_month = monthly.idxmax()
+        if monthly.empty:
+            return "Data waktu tidak cukup."
+
+        peak_month_en = monthly.idxmax()
         peak_val = monthly.max()
-        
-        return f"⏰ Analisis Waktu (Prime Time):\n Bulan Puncak: {peak_month} (Penjualan Tertinggi: {format_currency(peak_val)})\n\n💡 Strategi: Siapkan stok dan promo lebih gencar menjelang bulan {peak_month} untuk memaksimalkan momentum."
+        peak_month_id = self._get_indonesian_month(peak_month_en)
+        return (
+            f"⏰ Analisis Waktu (Prime Time):\n"
+            f"- Bulan Puncak: {peak_month_id} (Tertinggi: {format_currency(peak_val)})\n\n"
+            f"💡 Strategi: Siapkan stok & promo menjelang bulan {peak_month_id}."
+        )
 
     def analyze_customers(self):
-        if 'Cust' not in self.df.columns: return "Data Customer tidak tersedia."
+        if 'Cust' not in self.df.columns:
+            return "Data Customer tidak tersedia."
         cust_counts = self.df['Cust'].value_counts()
         top_cust = self.df.groupby('Cust')['Total Penjualan'].sum().nlargest(1).index[0]
-        
-        return f"👥 Profil Pelanggan:\n- Total Pelanggan Unik: {len(cust_counts)}\n- Top Customer: {top_cust}\n\n💡 Tips: Cek tab Customer untuk melihat siapa yang berpotensi jadi Reseller (pembelian >10 item)."
+        return (
+            f"👥 Profil Pelanggan:\n"
+            f"- Total Pelanggan Unik: {len(cust_counts)}\n"
+            f"- Top Customer: {top_cust}\n\n"
+            f"💡 Tips: Cek tab Customer untuk lihat reseller (Qty > 10 atau Frequency > 5)."
+        )
 
     def analyze_geography(self):
-        if 'Daerah' not in self.df.columns: return "Data Daerah tidak tersedia."
+        if 'Daerah' not in self.df.columns:
+            return "Data Daerah tidak tersedia."
         top_city = self.df.groupby('Daerah')['Total Penjualan'].sum().idxmax()
         uni_city = self.df['Daerah'].nunique()
-        
-        return f"🌍 Distribusi Geografis:\n- Jangkauan: {uni_city} Kota/Daerah\n- Pasar Terbesar: {top_city}\n\n💡 Ekspansi: Pertimbangkan ongkir subsidi ke {top_city} atau cari reseller di daerah baru yang belum terjamah."
+        return (
+            f"🌍 Distribusi Geografis:\n"
+            f"- Jangkauan: {uni_city} Kota/Daerah\n"
+            f"- Pasar Terbesar: {top_city}\n\n"
+            f"💡 Ekspansi: Pertimbangkan subsidi ongkir atau cari reseller di kota baru."
+        )
 
     def analyze_forecast(self):
-        return "💰 Prediksi Masa Depan:\nSistem menggunakan Regresi Linear untuk memprediksi penjualan hingga akhir 2026. Cek tab 'Prediction' untuk melihat grafik tren. Jika garis menanjak, pertahankan strategi! Jika menurun, segera buat inovasi baru."
+        return (
+            "💰 Prediksi Masa Depan:\n"
+            "Sistem menggunakan Regresi Linear untuk memprediksi penjualan hingga akhir 2026.\n"
+            "Cek tab 'Prediction' untuk grafik tren."
+        )
 
     def analyze_stock(self):
-         _, stats = self.generate_detailed_insights()
-         if stats.empty: return "Data stok aman."
-         
-         critical = stats[stats['Priority'] == 'critical']
-         high = stats[stats['Priority'] == 'high']
-         
-         msg = "📦 Kesehatan Stok & Rekomendasi:\n"
-         if not high.empty:
-             msg += f"- 🔥 {len(high)} Produk Star: Laris manis! Jaga stok jangan sampai kosong.\n"
-         if not critical.empty:
-             msg += f"- ⚠️ {len(critical)} Produk Slow Moving: Kurang diminati. Segera buat diskon/bundle.\n"
-         
-         return msg
+        _, stats = self.generate_detailed_insights()
+        if stats.empty:
+            return "📦 Data stok tidak cukup untuk analisis (produk_stats kosong)."
 
-    def nlp_processor(self, user_query):
-        user_query = user_query.lower()
-        
-        # MAPPING KEYWORDS KE FUNGSI ANALISIS
-        if any(x in user_query for x in ["halo", "hi", "siapa"]):
+        critical = stats[stats['Priority'] == 'critical']
+        high = stats[stats['Priority'] == 'high']
+
+        msg = "📦 Kesehatan Stok & Rekomendasi:\n"
+        if not high.empty:
+            msg += f"- 🔥 {len(high)} Produk Star: jaga stok jangan sampai kosong.\n"
+        if not critical.empty:
+            msg += f"- ⚠️ {len(critical)} Produk Slow Moving: buat diskon/bundle.\n"
+        if high.empty and critical.empty:
+            msg += "- ✅ Mayoritas produk stabil.\n"
+        return msg
+
+    # ==========================
+    # ✅ NEW HELPERS (for 50+ Q)
+    # ==========================
+
+    def _clean_text(self, text: str) -> str:
+        text = text.lower().strip()
+        text = re.sub(r'[^a-z0-9\s]+', ' ', text)
+        text = re.sub(r'\s+', ' ', text)
+        return text
+
+    def _has_cols(self, *cols):
+        return all(c in self.df.columns for c in cols)
+
+    def _top_star_products(self, n=5):
+        _, stats = self.generate_detailed_insights()
+        if stats.empty: 
+            return None
+        high = stats[stats["Priority"] == "high"].sort_values("Total Penjualan" if "Total Penjualan" in stats.columns else "Qty", ascending=False)
+        if high.empty:
+            # If no "high", take top by sales as "candidate"
+            base = self.df.groupby("Pesanan")["Total Penjualan"].sum().sort_values(ascending=False).head(n)
+            return ("candidate", base.index.tolist())
+        return ("high", high["Pesanan"].head(n).tolist())
+
+    def _slow_movers(self, n=5):
+        _, stats = self.generate_detailed_insights()
+        if stats.empty:
+            return []
+        slow = stats[stats["Priority"] == "critical"].sort_values("Qty", ascending=True)
+        return slow["Pesanan"].head(n).tolist()
+
+    def _category_ranking(self, n=5):
+        if not self._has_cols("Kategori", "Total Penjualan"):
+            return None
+        cat = self.df.groupby("Kategori")["Total Penjualan"].sum().sort_values(ascending=False).head(n)
+        return list(cat.items())
+
+    def _get_indonesian_month(self, month_name_en):
+        months = {
+            'January': 'Januari', 'February': 'Februari', 'March': 'Maret',
+            'April': 'April', 'May': 'Mei', 'June': 'Juni',
+            'July': 'Juli', 'August': 'Agustus', 'September': 'September',
+            'October': 'Oktober', 'November': 'November', 'December': 'Desember'
+        }
+        return months.get(month_name_en, month_name_en)
+
+    def _worst_month(self):
+        if not self._has_cols("Tanggal Order", "Total Penjualan"):
+            return None
+        dft = self.df.copy()
+        dft["Tanggal Order"] = pd.to_datetime(dft["Tanggal Order"], errors="coerce")
+        monthly = dft.groupby(dft["Tanggal Order"].dt.month_name())["Total Penjualan"].sum()
+        if monthly.empty:
+            return None
+        worst_en = monthly.idxmin()
+        worst_val = monthly.min()
+        return self._get_indonesian_month(worst_en), worst_val
+
+    def _top_city(self):
+        if not self._has_cols("Daerah", "Total Penjualan"):
+            return None
+        s = self.df.groupby("Daerah")["Total Penjualan"].sum().sort_values(ascending=False)
+        if s.empty:
+            return None
+        return s.index[0], s.iloc[0]
+
+    def _growth_trend_simple(self):
+        """Simple slope check on monthly revenue."""
+        if not self._has_cols("Tanggal Order", "Total Penjualan"):
+            return None
+        dft = self.df.copy()
+        dft["Tanggal Order"] = pd.to_datetime(dft["Tanggal Order"], errors="coerce")
+        monthly = dft.set_index("Tanggal Order").resample("M")["Total Penjualan"].sum().dropna()
+        if len(monthly) < 3:
+            return None
+        y = monthly.values
+        x = np.arange(len(y))
+        # slope
+        slope = np.polyfit(x, y, 1)[0]
+        return slope
+
+    def _help_menu(self):
+        return (
+            "Aku bisa jawab banyak hal, misalnya:\n"
+            "- 'ringkasan bisnis'\n"
+            "- 'produk terlaris'\n"
+            "- 'produk yang harus diiklankan'\n"
+            "- 'slow moving apa saja'\n"
+            "- 'bulan terbaik / terburuk'\n"
+            "- 'kota pasar terbesar'\n"
+            "- 'ranking kategori'\n"
+            "- 'prediksi penjualan'\n"
+            "- 'customer terbaik / reseller'\n"
+        )
+
+    # ==========================
+    # ✅ NEW: 50+ QUESTIONS NLP + GEMINI
+    # ==========================
+    def nlp_processor(self, user_query: str, api_key: str = None) -> str:
+        q = self._clean_text(user_query)
+
+        # ---- Rule Based Logic (Fallback/Hybrid) ----
+        # ---- greetings / identity ----
+        if re.search(r'\b(halo|hai|hi|hello|pagi|siang|sore|malam|siapa kamu|kamu siapa)\b', q):
             return (
-                "Halo! 👋 Saya Asisten AI untuk UMKM yang siap bantu kamu.\n"
-                "Aku bisa bantu jelasin:\n"
-                "✅ Produk apa yang lagi best seller\n"
-                "✅ Kapan waktu terbaik buat jualan (Prime Time)\n"
-                "✅ Prediksi penjualan ke depan\n"
-                "✅ Kondisi stok gudang\n\n"
-                "Tanya aja apa yang mau kamu tau!"
+                "Halo! 👋 Saya Asisten AI untuk UMKM.\n"
+                "Saya bisa bantu analisis:\n"
+                "✅ Ringkasan bisnis & tren\n"
+                "✅ Produk terlaris & rekomendasi iklan\n"
+                "✅ Prime time penjualan\n"
+                "✅ Customer & reseller\n"
+                "✅ Peta distribusi\n"
+                "✅ Prediksi penjualan\n"
+                "✅ Produk slow moving & strategi promo\n\n"
+                "Tanya aja ya!"
             )
-        
-        elif any(x in user_query for x in ["best", "laris", "top", "unggulan", "produk"]):
-            return self.analyze_bestsellers()
-            
-        elif any(x in user_query for x in ["prime", "waktu", "kapan", "bulan", "jam", "time"]):
-            return self.analyze_primetime()
-            
-        elif any(x in user_query for x in ["stock", "stok", "sisa", "inventory", "barang"]):
-            return self.analyze_stock()
-        
-        elif any(x in user_query for x in ["cust", "pelanggan", "pembeli", "orang"]):
-            return self.analyze_customers()
-            
-        elif any(x in user_query for x in ["peta", "lokasi", "daerah", "kota", "geo"]):
-            return self.analyze_geography()
-            
-        elif any(x in user_query for x in ["masa depan", "prediksi", "forecast", "proyeksi", "2025"]):
-            return self.analyze_forecast()
-            
-        elif any(x in user_query for x in ["overview", "ringkasan", "total", "pendapatan", "omset"]):
+
+        # ---- help / examples ----
+        if re.search(r'\b(bisa tanya apa|contoh pertanyaan|help|menu|bantuan|fitur)\b', q):
+            return self._help_menu()
+
+        # ---- overview / revenue / transactions ----
+        if re.search(r'\b(ringkasan|overview|summary|gambaran|total|omset|omzet|pendapatan|revenue|penjualan|transaksi|berapa transaksi)\b', q):
+            if re.search(r'\b(naik|turun|trend|tren|perkembangan|growth)\b', q):
+                slope = self._growth_trend_simple()
+                if slope is None:
+                    return "Aku butuh kolom **Tanggal Order** dan data minimal beberapa bulan untuk analisis tren."
+                if slope > 0:
+                    return "📈 Tren penjualan cenderung **naik** berdasarkan akumulasi bulanan. Pertahankan strategi dan siapkan stok lebih baik."
+                elif slope < 0:
+                    return "📉 Tren penjualan cenderung **turun** berdasarkan akumulasi bulanan. Pertimbangkan promo, bundling, atau fokus ke produk star."
+                else:
+                    return "➖ Tren penjualan relatif **stabil**."
             return self.analyze_overview()
+
+        # ---- best sellers / top products ----
+        if re.search(r'\b(produk|barang|item|terlaris|unggulan|top|best seller|best|paling laku|paling menghasilkan|ranking produk)\b', q):
+            if re.search(r'\b(iklankan|ads|push|promosi|promo iklan|boost)\b', q):
+                res = self._top_star_products(5)
+                if not res:
+                    return "Aku belum bisa menentukan produk iklan karena data produk belum cukup."
+                label, items = res
+                if label == "high":
+                    return "🎯 Produk yang paling layak diiklankan (Star Product):\n- " + "\n- ".join(items) + "\n\n💡 Fokus: iklan + jaga stok."
+                return "🎯 Kandidat terbaik untuk iklan (berdasarkan omset tertinggi):\n- " + "\n- ".join(items)
+            return self.analyze_bestsellers()
+
+        # ---- prime time / month peak / worst month ----
+        if re.search(r'\b(bulan terburuk|bulan sepi|worst month|paling rendah|paling dikit|penjualan rendah)\b', q):
+            worst = self._worst_month()
+            if not worst:
+                return "Aku butuh kolom **Tanggal Order** untuk menentukan bulan terburuk."
+            m, v = worst
+            return f"📉 Bulan terburuk: **{m}** dengan penjualan sekitar {format_currency(v)}.\n\n💡 Saran: siapkan promo khusus di bulan ini untuk menaikkan minat pembeli."
+
+        if re.search(r'\b(prime|waktu terbaik|kapan|bulan terbaik|bulan ramai|musim|peak|puncak)\b', q):
+            return self.analyze_primetime()
+
+        # ---- customers ----
+        if re.search(r'\b(customer|cust|pelanggan|pembeli|reseller|loyal|terbaik|paling sering)\b', q):
+            if re.search(r'\b(reseller)\b', q) and 'Cust' in self.df.columns:
+                cust_stats = self.df.groupby('Cust').agg({'Total Penjualan': 'sum','Qty': 'sum','Pesanan': 'count'}).rename(columns={'Pesanan':'Frequency'})
+                reseller = cust_stats[(cust_stats['Qty'] > 10) | (cust_stats['Frequency'] > 5)].sort_values('Total Penjualan', ascending=False)
+                if reseller.empty:
+                    return "Belum terlihat reseller kuat dari aturan sederhana (Qty>10 atau Frequency>5)."
+                top = reseller.head(5).index.tolist()
+                return "💎 Reseller potensial (Top 5):\n- " + "\n- ".join(top) + "\n\n💡 Beri harga khusus / paket grosir."
+            return self.analyze_customers()
+
+        # ---- geography ----
+        if re.search(r'\b(peta|lokasi|daerah|kota|wilayah|geo|geografi|pasar terbesar)\b', q):
+            if re.search(r'\b(pasar terbesar|kota terbaik|kota mana)\b', q):
+                top = self._top_city()
+                if not top:
+                    return "Aku butuh kolom **Daerah** untuk menentukan pasar terbesar."
+                city, val = top
+                return f"🏙️ Pasar terbesar saat ini: **{city}** dengan penjualan {format_currency(val)}.\n\n💡 Bisa coba cari reseller di {city}."
+            return self.analyze_geography()
+
+        # ---- stock / slow moving / bundle / discount ----
+        if re.search(r'\b(stok|stock|inventory|gudang|slow moving|menumpuk|diskon|bundle|habiskan|clearance)\b', q):
+            if re.search(r'\b(slow moving|menumpuk|kurang laku|habiskan|diskon|bundle)\b', q):
+                slow = self._slow_movers(5)
+                if not slow:
+                    return "Belum ada indikasi slow moving dari data saat ini."
+                return "⚠️ Produk slow moving (contoh 5 teratas):\n- " + "\n- ".join(slow) + "\n\n💡 Saran: bundling, diskon terbatas, atau bonus ongkir."
+            return self.analyze_stock()
+
+        # ---- category ranking ----
+        if re.search(r'\b(kategori|category|ranking kategori|peringkat kategori)\b', q):
+            cat = self._category_ranking(5)
+            if not cat:
+                return "Aku butuh kolom **Kategori** untuk membuat ranking kategori."
+            lines = [f"- {k}: {format_currency(v)}" for k, v in cat]
+            return "📌 Peringkat Kategori (Top 5):\n" + "\n".join(lines)
+
+        # ---- forecast ----
+        if re.search(r'\b(prediksi|forecast|proyeksi|masa depan|tahun depan|2026|trend ke depan|ramalan)\b', q):
+            return self.analyze_forecast()
+
+        # ---- DKK / DKS specific strategies ----
+        if re.search(r'\b(dkk|keratonian)\b', q):
+            return (
+                "🛡️ **Strategi DKK (Keratonian)**:\n"
+                "Produk ini adalah premium target. Pastikan visual iklan terlihat eksklusif.\n"
+                "💡 Saran: Gunakan influencer niche atau branding yang menekankan kualitas bahan."
+            )
             
-        else:
-            return "Maaf, saya belum paham. Coba tanya tentang: 'Produk Terlaris', 'Analisis Prime Time', 'Kondisi Stok', atau 'Prediksi Penjualan'."
+        if re.search(r'\b(dks|standar)\b', q):
+            return (
+                "📦 **Strategi DKS (Standard)**:\n"
+                "Produk ini bersifat mass-market. Fokus pada volume penjualan.\n"
+                "💡 Saran: Buat promo 'Beli 3 Lebih Hemat' atau bundling dengan produk best seller lainnya."
+            )
+
+        # ---- qty / volume ----
+        if re.search(r'\b(berapa banyak|jumlah barang|qty|volume terjual|total unit)\b', q):
+            total_qty = self.df['Qty'].sum()
+            return f"📦 Total volume barang terjual mencapai **{total_qty:,} unit**. Cek tab Best Seller untuk detail per item."
+
+        # ---- marketing strategy ----
+        if re.search(r'\b(marketing|pemasaran|promosi|iklan|ads|jualan|strategi bisnis|cara laku)\b', q):
+            # Check trend
+            slope = self._growth_trend_simple()
+            trend_msg = ""
+            if slope is not None:
+                if slope > 0: trend_msg = "Tren Anda sedang **naik**, saatnya ekspansi iklan ke wilayah baru."
+                else: trend_msg = "Tren Anda sedang **turun**, fokus pada retensi pelanggan setia dan promo bundle."
+            
+            # Check stock
+            _, stats = self.generate_detailed_insights()
+            stock_msg = ""
+            if not stats.empty:
+                slow = len(stats[stats['Priority'] == 'critical'])
+                if slow > 0: stock_msg = f"Terdapat {slow} produk slow moving. Segera buat **promo cuci gudang** atau **bundle hemat**."
+            
+            return (
+                "📢 **Rekomendasi Strategi Marketing**:\n"
+                f"1. **Tren**: {trend_msg if trend_msg else 'Jaga konsistensi konten media sosial.'}\n"
+                f"2. **Stok**: {stock_msg if stock_msg else 'Stok aman, fokus pada produk Star (terlaris).'}\n"
+                "3. **Channel**: Optimalkan Marketplace Ads di jam-jam ramai (Prime Time).\n"
+                "4. **Loyalty**: Beri voucher khusus untuk Top Customer agar mereka repeat order sebagai Reseller."
+            )
+
+        # ---- GEMINI LLM integration ----
+        if api_key:
+            try:
+                genai.configure(api_key=api_key)
+                model = genai.GenerativeModel('gemini-2.0-flash')
+                
+                # Context building
+                context = (
+                    f"Anda adalah analis bisnis UMKM. Anda memiliki data dashboard dengan ringkasan:\n"
+                    f"{self.analyze_overview()}\n"
+                    f"{self.analyze_stock()}\n"
+                    f"Gunakan data ini untuk menjawab pertanyaan user secara profesional, singkat, dan solutif."
+                )
+                
+                response = model.generate_content(f"{context}\n\nPertanyaan User: {user_query}")
+                return response.text
+                
+            except Exception as e:
+                return f"❌ Terjadi kesalahan saat menghubungi Gemini: {str(e)}\n\nCoba periksa API Key Anda atau gunakan pertanyaan yang dipahami sistem rule-based."
+
+        # ---- fallback ----
+        return (
+            "Maaf, aku belum paham pertanyaannya.\n\n"
+            "Coba tanya dengan contoh:\n"
+            "- 'ringkasan bisnis'\n"
+            "- 'produk terlaris'\n"
+            "- 'produk yang harus diiklankan'\n"
+            "- 'slow moving apa'\n"
+            "- 'bulan terbaik / terburuk'\n"
+            "- 'pasar terbesar kota mana'\n"
+            "- 'ranking kategori'\n"
+            "- 'prediksi penjualan'\n"
+        )
 
 # ═══════════════════════════════════════════════════════════════
 # 📊 UTILITY ANALYZERS
@@ -375,8 +650,22 @@ def get_coordinates(city_name):
 # 📱 MAIN APPLICATION UI
 # ═══════════════════════════════════════════════════════════════
 
-# DATA LOADING (Moved up for Dynamic Header)
+# DATA LOADING & SIDEBAR
 uploaded_file = st.sidebar.file_uploader("📂 Unggah Data", type=['xlsx', 'csv'])
+
+# API KEY SECTION
+st.sidebar.markdown("---")
+st.sidebar.subheader("🔑 API Configuration")
+st.session_state.gemini_api_key = st.sidebar.text_input(
+    "Gemini API Key", 
+    value=st.session_state.gemini_api_key, 
+    type="password",
+    help="Dapatkan di: https://makersuite.google.com/app/apikey"
+)
+if st.session_state.gemini_api_key:
+    st.sidebar.success("✅ Gemini AI Ready")
+else:
+    st.sidebar.info("💡 Masukkan API Key untuk fitur AI yang lebih cerdas.")
 
 # HEADER
 c1, c2 = st.columns([7, 3]) 
@@ -571,7 +860,7 @@ if uploaded_file:
 
         # TAB 6: FORECASTING (2025)
         with tabs[5]:
-            st.subheader("🔮 ** 2026)")
+            st.subheader("🔮 Prediksi Penjualan (Hingga Des 2026)")
             forecast_df = forecaster.predict_until_date("2026-12-31")
             
             if forecast_df is not None:
@@ -626,13 +915,21 @@ if uploaded_file:
             for msg in st.session_state.chat_history:
                 role_class = "chat-user" if msg['role'] == 'user' else "chat-ai"
                 prefix = "👤" if msg['role'] == 'user' else "🤖"
-                st.markdown(f'<div class="{role_class}">{prefix} {msg["content"]}</div>', unsafe_allow_html=True)
+                
+                # Formatter: Convert Markdown Bold to HTML Bold
+                content_display = msg["content"]
+                if "**" in content_display:
+                    import re
+                    content_display = re.sub(r'\*\*(.*?)\*\*', r'<b>\1</b>', content_display)
+                
+                st.markdown(f'<div class="{role_class}">{prefix} {content_display}</div>', unsafe_allow_html=True)
             
             with st.form("chat_form", clear_on_submit=True):
-                q = st.text_input("Tanya sesuatu...", placeholder="Apa produk terlarisnya?")
+                q = st.text_input("Tanya sesuatu...", placeholder="Apa strategi DKK?")
                 if st.form_submit_button("Kirim") and q:
                     st.session_state.chat_history.append({"role": "user", "content": q})
-                    ans = expert.nlp_processor(q)
+                    # Pass API key to enable Gemini if available
+                    ans = expert.nlp_processor(q, api_key=st.session_state.gemini_api_key)
                     st.session_state.chat_history.append({"role": "assistant", "content": ans})
                     st.rerun()
 
