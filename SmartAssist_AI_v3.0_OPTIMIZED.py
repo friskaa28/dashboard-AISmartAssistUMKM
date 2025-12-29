@@ -210,7 +210,7 @@ class ExpertSystem:
     def analyze_bestsellers(self):
         if 'Pesanan' not in self.df.columns: return "Data Pesanan tidak tersedia."
         top_prod = self.df.groupby('Pesanan')['Total Penjualan'].sum().nlargest(3)
-        msg = "🏆 **Produk Unggulan (Top 3)**:\n"
+        msg = "🏆 Produk Unggulan (Top 3):\n"
         for i, (name, val) in enumerate(top_prod.items(), 1):
             msg += f"{i}. {name} ({format_currency(val)})\n"
         
@@ -259,9 +259,9 @@ class ExpertSystem:
          
          msg = "📦 Kesehatan Stok & Rekomendasi:\n"
          if not high.empty:
-             msg += f"- 🔥 **{len(high)} Produk Star**: Laris manis! Jaga stok jangan sampai kosong.\n"
+             msg += f"- 🔥 {len(high)} Produk Star: Laris manis! Jaga stok jangan sampai kosong.\n"
          if not critical.empty:
-             msg += f"- ⚠️ **{len(critical)} Produk Slow Moving**: Kurang diminati. Segera buat diskon/bundle.\n"
+             msg += f"- ⚠️ {len(critical)} Produk Slow Moving: Kurang diminati. Segera buat diskon/bundle.\n"
          
          return msg
 
@@ -275,7 +275,6 @@ class ExpertSystem:
                 "Aku bisa bantu jelasin:\n"
                 "✅ Produk apa yang lagi best seller\n"
                 "✅ Kapan waktu terbaik buat jualan (Prime Time)\n"
-                "✅ Siapa aja pelanggan setiamu\n"
                 "✅ Prediksi penjualan ke depan\n"
                 "✅ Kondisi stok gudang\n\n"
                 "Tanya aja apa yang mau kamu tau!"
@@ -630,7 +629,7 @@ if uploaded_file:
                 st.markdown(f'<div class="{role_class}">{prefix} {msg["content"]}</div>', unsafe_allow_html=True)
             
             with st.form("chat_form", clear_on_submit=True):
-                q = st.text_input("Tanya sesuatu...", placeholder="Apa strategi DKK?")
+                q = st.text_input("Tanya sesuatu...", placeholder="Apa produk terlarisnya?")
                 if st.form_submit_button("Kirim") and q:
                     st.session_state.chat_history.append({"role": "user", "content": q})
                     ans = expert.nlp_processor(q)
