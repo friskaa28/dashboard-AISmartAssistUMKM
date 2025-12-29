@@ -153,9 +153,31 @@ st.markdown(f"""
         background-color: {current_theme['card']} !important;
         color: {current_theme['text']} !important;
     }}
+
+    /* STICKY EXPERT AI COLUMN */
+    [data-testid="column"]:nth-of-type(2) {{
+        position: -webkit-sticky !important;
+        position: sticky !important;
+        top: 50px !important;
+        align-self: flex-start !important;
+        max-height: 95vh !important;
+        padding-right: 10px !important;
+    }}
+
+    /* INTERNAL CHAT SCROLL */
+    .chat-container {{
+        max-height: 400px;
+        overflow-y: auto;
+        padding: 10px;
+        border: 1px solid {current_theme['border']};
+        border-radius: 10px;
+        background: {current_theme['bg']};
+        margin-bottom: 10px;
+        display: flex;
+        flex-direction: column;
+    }}
 </style>
 """, unsafe_allow_html=True)
-
 
 # ═══════════════════════════════════════════════════════════════
 # 🧠 INTELLIGENT BACKEND
