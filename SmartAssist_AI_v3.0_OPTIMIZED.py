@@ -39,7 +39,7 @@ if "show_expert_panel" not in st.session_state:
     st.session_state.show_expert_panel = False 
 if "chat_history" not in st.session_state:
     st.session_state.chat_history = [
-        {"role": "system", "content": "Halo! Saya Assistant AI Keratonian. Tanyakan tentang 'produk terlaris', 'analisis stok', atau 'strategi marketing'."}
+        {"role": "assistant", "content": "Halo! 👋 Saya Asisten AI untuk UMKM yang siap bantu kamu.\nAku bisa bantu jelasin:\n✅ Produk apa yang lagi best seller\n✅ Kapan waktu terbaik buat jualan (Prime Time)\n✅ Siapa aja pelanggan setiamu\n✅ Prediksi penjualan ke depan\n✅ Kondisi stok gudang\n\nTanya aja apa yang mau kamu tau!"}
     ]
 
 # THEME DEFINITIONS
@@ -65,6 +65,9 @@ THEMES = {
 }
 
 current_theme = THEMES[st.session_state.theme]
+
+# EXPERT AI BUTTON STATE COLOR
+expert_btn_color = "#02356C" if st.session_state.show_expert_panel else "#007BFF"
 
 # CSS FOR PREMIUM UI & DARK MODE FIXES
 st.markdown(f"""
@@ -95,9 +98,9 @@ st.markdown(f"""
         color: {current_theme['text']};
     }}
     
-    /* EXPERT AI BUTTON - FORCE BLUE */
+    /* EXPERT AI BUTTON - DYNAMIC COLOR */
     div.stButton > button[kind="primary"] {{
-        background-color: #007BFF !important;
+        background-color: {expert_btn_color} !important;
         color: white !important;
         border: none !important;
         font-weight: bold !important;
@@ -107,12 +110,12 @@ st.markdown(f"""
         color: white !important;
     }}
     div.stButton > button[kind="primary"]:hover {{
-        background-color: #0056b3 !important;
+        background-color: #004494 !important;
     }}
 
     /* CHAT BUBBLES */
     .chat-user {{
-        background: #007BFF;
+        background: {expert_btn_color};
         color: white !important;
         padding: 10px 15px;
         border-radius: 15px 15px 0 15px;
@@ -145,7 +148,6 @@ st.markdown(f"""
 </style>
 """, unsafe_allow_html=True)
 
-
 # ═══════════════════════════════════════════════════════════════
 # 🧠 INTELLIGENT BACKEND
 # ═══════════════════════════════════════════════════════════════
@@ -155,16 +157,7 @@ class ExpertSystem:
         self.df = df
         # Normalize Column Names
         self.df.columns = self.df.columns.str.strip()
-        self.vectorizer = TfidfVectorizer()
-        # Knowledge Base
-        self.intents = {
-            "bestsellers": ["produk terlaris", "paling laku", "best seller", "top produk"],
-            "performance": ["performa", "penjualan", "omset", "revenue", "pendapatan"],
-            "stock": ["stok", "inventory", "habis", "sisa", "slow moving", "dead stock"],
-            "marketing": ["marketing", "promosi", "strategi", "iklan"],
-            "customers": ["customer", "pelanggan", "pembeli", "konsumen"]
-        }
-    
+
     def fuzzy_decision_engine(self, row):
         sales_score = row['norm_sales']
         if sales_score > 0.8:
@@ -207,22 +200,110 @@ class ExpertSystem:
 
         return insights, product_stats
 
+    # ✅ UPDATED: Complete Chatbot Logic
+    def analyze_overview(self):
+        total_rev = self.df['Total Penjualan'].sum()
+        total_order = len(self.df)
+        total_prod = self.df['Pesanan'].nunique()
+        return f"📊 **Ringkasan Bisnis**:\n- Total Pendapatan: {format_currency(total_rev)}\n- Total Transaksi: {total_order}\n- Variasi Produk: {total_prod} Item\n\nBisnis Anda berjalan aktif! Cek tab lain untuk detail lebih dalam."
+
+    def analyze_bestsellers(self):
+        if 'Pesanan' not in self.df.columns: return "Data Pesanan tidak tersedia."
+        top_prod = self.df.groupby('Pesanan')['Total Penjualan'].sum().nlargest(3)
+        msg = "🏆 **Produk Unggulan (Top 3)**:\n"
+        for i, (name, val) in enumerate(top_prod.items(), 1):
+            msg += f"{i}. {name} ({format_currency(val)})\n"
+        
+        msg += "\n💡 **Saran**: Pastikan stok produk ini selalu aman karena berkontribusi terbesar pada omset."
+        return msg
+
+    def analyze_primetime(self):
+        if 'Tanggal Order' not in self.df.columns: return "Data Tanggal Order tidak tersedia untuk analisis waktu."
+        
+        # Ensure datetime
+        df_time = self.df.copy()
+        df_time['Tanggal Order'] = pd.to_datetime(df_time['Tanggal Order'], errors='coerce')
+        
+        # Monthly Peak
+        monthly = df_time.groupby(df_time['Tanggal Order'].dt.month_name())['Total Penjualan'].sum()
+        if monthly.empty: return "Data waktu tidak cukup."
+        
+        peak_month = monthly.idxmax()
+        peak_val = monthly.max()
+        
+        return f"⏰ **Analisis Waktu (Prime Time)**:\n- **Bulan Puncak**: {peak_month} (Penjualan Tertinggi: {format_currency(peak_val)})\n\n💡 **Strategi**: Siapkan stok dan promo lebih gencar menjelang bulan {peak_month} untuk memaksimalkan momentum."
+
+    def analyze_customers(self):
+        if 'Cust' not in self.df.columns: return "Data Customer tidak tersedia."
+        cust_counts = self.df['Cust'].value_counts()
+        top_cust = self.df.groupby('Cust')['Total Penjualan'].sum().nlargest(1).index[0]
+        
+        return f"👥 **Profil Pelanggan**:\n- Total Pelanggan Unik: {len(cust_counts)}\n- **Top Customer**: {top_cust}\n\n💡 **Tips**: Cek tab Customer untuk melihat siapa yang berpotensi jadi Reseller (pembelian >10 item)."
+
+    def analyze_geography(self):
+        if 'Daerah' not in self.df.columns: return "Data Daerah tidak tersedia."
+        top_city = self.df.groupby('Daerah')['Total Penjualan'].sum().idxmax()
+        uni_city = self.df['Daerah'].nunique()
+        
+        return f"🌍 **Distribusi Geografis**:\n- Jangkauan: {uni_city} Kota/Daerah\n- **Pasar Terbesar**: {top_city}\n\n💡 **Ekspansi**: Pertimbangkan ongkir subsidi ke {top_city} atau cari reseller di daerah baru yang belum terjamah."
+
+    def analyze_forecast(self):
+        return "💰 **Prediksi Masa Depan**:\nSistem menggunakan Regresi Linear untuk memprediksi penjualan hingga akhir 2025. Cek tab 'Prediksi (2025)' untuk melihat grafik tren. Jika garis menanjak, pertahankan strategi! Jika menurun, segera buat inovasi baru."
+
+    def analyze_stock(self):
+         _, stats = self.generate_detailed_insights()
+         if stats.empty: return "Data stok aman."
+         
+         critical = stats[stats['Priority'] == 'critical']
+         high = stats[stats['Priority'] == 'high']
+         
+         msg = "📦 **Kesehatan Stok & Rekomendasi**:\n"
+         if not high.empty:
+             msg += f"- 🔥 **{len(high)} Produk Star**: Laris manis! Jaga stok jangan sampai kosong.\n"
+         if not critical.empty:
+             msg += f"- ⚠️ **{len(critical)} Produk Slow Moving**: Kurang diminati. Segera buat diskon/bundle.\n"
+         
+         return msg
+
     def nlp_processor(self, user_query):
         user_query = user_query.lower()
-        detected_intent = "unknown"
-        for intent, keywords in self.intents.items():
-            for kw in keywords:
-                if kw in user_query:
-                    detected_intent = intent
-                    break
         
-        if detected_intent == "bestsellers":
-            top_5 = self.df.groupby('Pesanan')['Total Penjualan'].sum().nlargest(5)
-            return "Top 5 Produk:\n" + "\n".join([f"- {i}. {idx}" for i, (idx, val) in enumerate(top_5.items(), 1)])
-        elif detected_intent == "stock":
-            return "Analisis Fuzzy Logic menunjukkan beberapa item 'Slow Moving'. Cek panel Stock Recs."
+        # MAPPING KEYWORDS KE FUNGSI ANALISIS
+        if any(x in user_query for x in ["halo", "hi", "siapa"]):
+            return (
+                "Halo! 👋 Saya Asisten AI untuk UMKM yang siap bantu kamu.\n"
+                "Aku bisa bantu jelasin:\n"
+                "✅ Produk apa yang lagi best seller\n"
+                "✅ Kapan waktu terbaik buat jualan (Prime Time)\n"
+                "✅ Siapa aja pelanggan setiamu\n"
+                "✅ Prediksi penjualan ke depan\n"
+                "✅ Kondisi stok gudang\n\n"
+                "Tanya aja apa yang mau kamu tau!"
+            )
+        
+        elif any(x in user_query for x in ["best", "laris", "top", "unggulan", "produk"]):
+            return self.analyze_bestsellers()
+            
+        elif any(x in user_query for x in ["prime", "waktu", "kapan", "bulan", "jam", "time"]):
+            return self.analyze_primetime()
+            
+        elif any(x in user_query for x in ["stock", "stok", "sisa", "inventory", "barang"]):
+            return self.analyze_stock()
+        
+        elif any(x in user_query for x in ["cust", "pelanggan", "pembeli", "orang"]):
+            return self.analyze_customers()
+            
+        elif any(x in user_query for x in ["peta", "lokasi", "daerah", "kota", "geo"]):
+            return self.analyze_geography()
+            
+        elif any(x in user_query for x in ["masa depan", "prediksi", "forecast", "proyeksi", "2025"]):
+            return self.analyze_forecast()
+            
+        elif any(x in user_query for x in ["overview", "ringkasan", "total", "pendapatan", "omset"]):
+            return self.analyze_overview()
+            
         else:
-            return "Topik tidak dikenali. Coba 'produk terlaris' atau 'stok'."
+            return "Maaf, saya belum paham. Coba tanya tentang: 'Produk Terlaris', 'Analisis Prime Time', 'Kondisi Stok', atau 'Prediksi Penjualan'."
 
 # ═══════════════════════════════════════════════════════════════
 # 📊 UTILITY ANALYZERS
@@ -253,8 +334,12 @@ class SalesForecaster:
         forecast = model.predict(future_X)
         future_dates = [last_date + pd.DateOffset(months=i) for i in range(1, delta + 1)]
         
+        # ✅ FIX: Format date to remove time component
+        future_dates = [d.date() for d in future_dates]
+        monthly_index_date = [d.date() for d in monthly.index]
+        
         forecast_df = pd.DataFrame({'Date': future_dates, 'Predicted Sales': forecast, 'Type': 'Prediksi'})
-        history_df = pd.DataFrame({'Date': monthly.index, 'Predicted Sales': monthly.values, 'Type': 'Riwayat'})
+        history_df = pd.DataFrame({'Date': monthly_index_date, 'Predicted Sales': monthly.values, 'Type': 'Riwayat'})
         return pd.concat([history_df, forecast_df])
 
 # ═══════════════════════════════════════════════════════════════
