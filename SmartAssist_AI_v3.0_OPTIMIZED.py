@@ -206,31 +206,104 @@ st.markdown(f"""
 # 🧠 BACKEND CLASSES
 # ============================================================
 class ExpertSystem:
-    def __init__(self, df: pd.DataFrame):
-        self.df = df.copy()
+    def __init__(self, df):
+        self.df = df
+        # Normalize Column Names
         self.df.columns = self.df.columns.str.strip()
 
     def fuzzy_decision_engine(self, row):
-        sales_score = row.get('norm_sales', 0)
+        sales_score = row['norm_sales']
         if sales_score > 0.8:
             return "🔥 STAR PRODUCT (Push Ads)", "high"
         elif sales_score > 0.4:
             return "✅ STABLE (Maintain)", "medium"
-        return "⚠️ SLOW MOVING (Diskon/Bundle)", "critical"
+        else:
+            return "⚠️ SLOW MOVING (Diskon/Bundle)", "critical"
+
+    def _parse_date_indonesia(self, val):
+        if pd.isnull(val): return None
+        if isinstance(val, (pd.Timestamp, np.datetime64)): return val
+        
+        # Mapping bulan Indonesia
+        month_map = {
+            'januari': 'january', 'februari': 'february', 'maret': 'march',
+            'april': 'april', 'mei': 'may', 'juni': 'june',
+            'juli': 'july', 'agustus': 'august', 'september': 'september',
+            'oktober': 'october', 'november': 'november', 'desember': 'december',
+            'jan': 'january', 'feb': 'february', 'mar': 'march', 'apr': 'april',
+            'mei': 'may', 'jun': 'june', 'jul': 'july', 'agu': 'august',
+            'sep': 'september', 'okt': 'october', 'nov': 'november', 'des': 'december'
+        }
+        
+        s = str(val).lower().strip()
+        for ind, eng in month_map.items():
+            if ind in s:
+                s = s.replace(ind, eng)
+        
+        # Try parsing after replacement
+        try:
+            return pd.to_datetime(s, errors='coerce', dayfirst=True)
+        except:
+            return None
 
     def generate_detailed_insights(self):
         insights = []
-        if 'Total Penjualan' not in self.df.columns or 'Pesanan' not in self.df.columns or 'Qty' not in self.df.columns:
+        if 'Total Penjualan' not in self.df.columns:
             return insights, pd.DataFrame()
+            
+        # 📅 Rentang Data & Revenue Breakdown
+        if 'Tanggal Order' in self.df.columns:
+            df_temp = self.df.copy()
+            
+            # 1. Parsing normal + Indonesian Fallback
+            df_temp['Date_Parsed'] = pd.to_datetime(df_temp['Tanggal Order'], errors='coerce')
+            mask_fail = df_temp['Date_Parsed'].isnull() & df_temp['Tanggal Order'].notnull()
+            if mask_fail.any():
+                df_temp.loc[mask_fail, 'Date_Parsed'] = df_temp.loc[mask_fail, 'Tanggal Order'].apply(self._parse_date_indonesia)
 
-        total_sales = float(self.df['Total Penjualan'].sum())
-        insights.append({"type": "info", "text": f"Revenue: **Rp {total_sales:,.0f}**"})
+            # 2. Extract Year (from date or regex fallback)
+            def find_year_robust(row):
+                # Check parsed date first
+                if pd.notnull(row['Date_Parsed']):
+                    return row['Date_Parsed'].year 
+                
+                # Regex fallback for 4-digit years (2020-2029)
+                val_str = str(row['Tanggal Order'])
+                match = re.search(r'\b(20[2-9][0-9])\b', val_str)
+                if match:
+                    return int(match.group(1))
+                return None
 
+            df_temp['Year_Final'] = df_temp.apply(find_year_robust, axis=1)
+            
+            # Show Date Range (from parsed dates)
+            min_date = df_temp['Date_Parsed'].min()
+            max_date = df_temp['Date_Parsed'].max()
+            if pd.notnull(min_date) and pd.notnull(max_date):
+                insights.append({"type": "info", "text": f"Periode Data: **{min_date.strftime('%d %b %Y')}** s/d **{max_date.strftime('%d %b %Y')}**"})
+            
+            # Dynamic Yearly Revenue
+            available_years = sorted(df_temp['Year_Final'].dropna().unique().astype(int))
+            for yr in available_years:
+                rev_yr = df_temp[df_temp['Year_Final'] == yr]['Total Penjualan'].sum()
+                if rev_yr > 0:
+                    label = f"Revenue {yr}"
+                    if yr == 2025: label = "Revenue 2025 (Q1)"
+                    insights.append({"type": "info", "text": f"{label}: **Rp {rev_yr:,.0f}**"})
+            
+            # Final check for missing attribution
+            unassigned_rev = df_temp[df_temp['Year_Final'].isnull()]['Total Penjualan'].sum()
+            if unassigned_rev > 0:
+                insights.append({"type": "warning", "text": f"Revenue Belum Terproses: **Rp {unassigned_rev:,.0f}** (Cek format tanggal)"})
+
+        total_sales = self.df['Total Penjualan'].sum()
+        insights.append({"type": "success", "text": f"Total Revenue: **Rp {total_sales:,.0f}**"})
+        
         product_stats = self.df.groupby('Pesanan').agg({
             'Total Penjualan': 'sum',
             'Qty': 'sum'
         }).reset_index()
-
+        
         if not product_stats.empty:
             scaler = StandardScaler()
             if len(product_stats) > 1:
@@ -238,10 +311,8 @@ class ExpertSystem:
                 product_stats['norm_sales'] = 1 / (1 + np.exp(-sales_scaled))
             else:
                 product_stats['norm_sales'] = 0.5
-
-            rec_pri = product_stats.apply(self.fuzzy_decision_engine, axis=1)
-            product_stats['Recommendation'] = rec_pri.apply(lambda x: x[0])
-            product_stats['Priority'] = rec_pri.apply(lambda x: x[1])
+            
+            product_stats['Recommendation'], product_stats['Priority'] = zip(*product_stats.apply(self.fuzzy_decision_engine, axis=1))
 
             slow_movers = product_stats[product_stats['Priority'] == 'critical']
             if not slow_movers.empty:
@@ -251,6 +322,8 @@ class ExpertSystem:
                     "type": "warning",
                     "text": f"⚠️ **{count} Produk Slow Moving** (e.g., {top_slow}). Buat promo bundle!"
                 })
+        else:
+            product_stats = pd.DataFrame()
 
         return insights, product_stats
 
