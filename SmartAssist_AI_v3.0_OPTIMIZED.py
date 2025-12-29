@@ -179,6 +179,7 @@ st.markdown(f"""
 </style>
 """, unsafe_allow_html=True)
 
+
 # ═══════════════════════════════════════════════════════════════
 # 🧠 INTELLIGENT BACKEND
 # ═══════════════════════════════════════════════════════════════
@@ -934,6 +935,9 @@ if uploaded_file:
             
             st.divider()
             st.markdown("##### 💬 Asisten Chat")
+            
+            # --- INTERNAL SCROLLABLE CHAT AREA ---
+            chat_html = '<div class="chat-container">'
             for msg in st.session_state.chat_history:
                 role_class = "chat-user" if msg['role'] == 'user' else "chat-ai"
                 prefix = "👤" if msg['role'] == 'user' else "🤖"
@@ -944,7 +948,10 @@ if uploaded_file:
                     import re
                     content_display = re.sub(r'\*\*(.*?)\*\*', r'<b>\1</b>', content_display)
                 
-                st.markdown(f'<div class="{role_class}">{prefix} {content_display}</div>', unsafe_allow_html=True)
+                chat_html += f'<div class="{role_class}">{prefix} {content_display}</div>'
+            chat_html += '</div>'
+            
+            st.markdown(chat_html, unsafe_allow_html=True)
             
             with st.form("chat_form", clear_on_submit=True):
                 q = st.text_input("Tanya sesuatu...", placeholder="Apa strategi DKK?")
