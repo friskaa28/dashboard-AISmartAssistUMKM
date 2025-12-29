@@ -231,24 +231,24 @@ class ExpertSystem:
         peak_month = monthly.idxmax()
         peak_val = monthly.max()
         
-        return f"⏰ **Analisis Waktu (Prime Time)**:\n- **Bulan Puncak**: {peak_month} (Penjualan Tertinggi: {format_currency(peak_val)})\n\n💡 **Strategi**: Siapkan stok dan promo lebih gencar menjelang bulan {peak_month} untuk memaksimalkan momentum."
+        return f"⏰ Analisis Waktu (Prime Time):\n Bulan Puncak: {peak_month} (Penjualan Tertinggi: {format_currency(peak_val)})\n\n💡 Strategi: Siapkan stok dan promo lebih gencar menjelang bulan {peak_month} untuk memaksimalkan momentum."
 
     def analyze_customers(self):
         if 'Cust' not in self.df.columns: return "Data Customer tidak tersedia."
         cust_counts = self.df['Cust'].value_counts()
         top_cust = self.df.groupby('Cust')['Total Penjualan'].sum().nlargest(1).index[0]
         
-        return f"👥 **Profil Pelanggan**:\n- Total Pelanggan Unik: {len(cust_counts)}\n- **Top Customer**: {top_cust}\n\n💡 **Tips**: Cek tab Customer untuk melihat siapa yang berpotensi jadi Reseller (pembelian >10 item)."
+        return f"👥 Profil Pelanggan:\n- Total Pelanggan Unik: {len(cust_counts)}\n- Top Customer: {top_cust}\n\n💡 Tips: Cek tab Customer untuk melihat siapa yang berpotensi jadi Reseller (pembelian >10 item)."
 
     def analyze_geography(self):
         if 'Daerah' not in self.df.columns: return "Data Daerah tidak tersedia."
         top_city = self.df.groupby('Daerah')['Total Penjualan'].sum().idxmax()
         uni_city = self.df['Daerah'].nunique()
         
-        return f"🌍 **Distribusi Geografis**:\n- Jangkauan: {uni_city} Kota/Daerah\n- **Pasar Terbesar**: {top_city}\n\n💡 **Ekspansi**: Pertimbangkan ongkir subsidi ke {top_city} atau cari reseller di daerah baru yang belum terjamah."
+        return f"🌍 Distribusi Geografis:\n- Jangkauan: {uni_city} Kota/Daerah\n- Pasar Terbesar: {top_city}\n\n💡 Ekspansi: Pertimbangkan ongkir subsidi ke {top_city} atau cari reseller di daerah baru yang belum terjamah."
 
     def analyze_forecast(self):
-        return "💰 **Prediksi Masa Depan**:\nSistem menggunakan Regresi Linear untuk memprediksi penjualan hingga akhir 2025. Cek tab 'Prediksi (2025)' untuk melihat grafik tren. Jika garis menanjak, pertahankan strategi! Jika menurun, segera buat inovasi baru."
+        return "💰 Prediksi Masa Depan:\nSistem menggunakan Regresi Linear untuk memprediksi penjualan hingga akhir 2026. Cek tab 'Prediction' untuk melihat grafik tren. Jika garis menanjak, pertahankan strategi! Jika menurun, segera buat inovasi baru."
 
     def analyze_stock(self):
          _, stats = self.generate_detailed_insights()
@@ -257,7 +257,7 @@ class ExpertSystem:
          critical = stats[stats['Priority'] == 'critical']
          high = stats[stats['Priority'] == 'high']
          
-         msg = "📦 **Kesehatan Stok & Rekomendasi**:\n"
+         msg = "📦 Kesehatan Stok & Rekomendasi:\n"
          if not high.empty:
              msg += f"- 🔥 **{len(high)} Produk Star**: Laris manis! Jaga stok jangan sampai kosong.\n"
          if not critical.empty:
@@ -572,8 +572,8 @@ if uploaded_file:
 
         # TAB 6: FORECASTING (2025)
         with tabs[5]:
-            st.subheader("🔮 Prediksi Penjualan (Hingga Des 2025)")
-            forecast_df = forecaster.predict_until_date("2025-12-31")
+            st.subheader("🔮 ** 2026)")
+            forecast_df = forecaster.predict_until_date("2026-12-31")
             
             if forecast_df is not None:
                 st.line_chart(forecast_df.set_index('Date')['Predicted Sales'], color=current_theme['accent'])
@@ -590,7 +590,7 @@ if uploaded_file:
                 # ✅ UPDATED: Added Glossary/Legend
                 with st.expander("ℹ️ Glossary: ​​What does this status mean?"):
                     st.markdown("""
-                    **Level Prioritas (Fuzzy Logic):**
+                    **Level Prioritas:**
                     - **🔥 High (Star Product)**: Penjualan sangat tinggi. **Rekomendasi**: Dorong iklan dan jaga stok.
                     - **✅ Medium (Stable)**: Penjualan konsisten. **Rekomendasi**: Pertahankan strategi saat ini.
                     - **⚠️ Critical (Slow Moving)**: Inventaris tinggi tapi penjualan rendah. **Rekomendasi**: Buat bundle promo atau diskon untuk menghabiskan stok.
