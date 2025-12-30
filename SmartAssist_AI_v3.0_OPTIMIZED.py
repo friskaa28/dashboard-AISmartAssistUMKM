@@ -193,11 +193,11 @@ class ExpertSystem:
     def fuzzy_decision_engine(self, row):
         sales_score = row['norm_sales']
         if sales_score > 0.8:
-            return "🔥 STAR PRODUCT (Push Ads)", "high"
+            return "🔥 STAR PRODUCT (Push Ads)", "high", "Perbanyak stok 2x - 3x"
         elif sales_score > 0.4:
-            return "✅ STABLE (Maintain)", "medium"
+            return "✅ STABLE (Maintain)", "medium", "Pertahankan stok (1.2x - 1.5x)"
         else:
-            return "⚠️ SLOW MOVING (Diskon/Bundle)", "critical"
+            return "⚠️ SLOW MOVING (Diskon/Bundle)", "critical", "Kurangi stok (0.5x) / Cuci Gudang"
 
     def _parse_date_indonesia(self, val):
         if pd.isnull(val): return None
@@ -291,7 +291,7 @@ class ExpertSystem:
             else:
                 product_stats['norm_sales'] = 0.5
             
-            product_stats['Recommendation'], product_stats['Priority'] = zip(*product_stats.apply(self.fuzzy_decision_engine, axis=1))
+            product_stats['Recommendation'], product_stats['Priority'], product_stats['Stock_Adjustment'] = zip(*product_stats.apply(self.fuzzy_decision_engine, axis=1))
 
             slow_movers = product_stats[product_stats['Priority'] == 'critical']
             if not slow_movers.empty:
@@ -423,11 +423,11 @@ class ExpertSystem:
 
         msg = "📦 Kesehatan Stok & Rekomendasi:\n"
         if not high.empty:
-            msg += f"- 🔥 {len(high)} Produk Star: jaga stok jangan sampai kosong.\n"
+            msg += f"- 🔥 {len(high)} Produk Star: perbanyak stok 2x-3x agar tidak kosong.\n"
         if not critical.empty:
-            msg += f"- ⚠️ {len(critical)} Produk Slow Moving: buat diskon/bundle.\n"
+            msg += f"- ⚠️ {len(critical)} Produk Slow Moving: kurangi stok (0.5x) & buat diskon/bundle.\n"
         if high.empty and critical.empty:
-            msg += "- ✅ Mayoritas produk stabil.\n"
+            msg += "- ✅ Mayoritas produk stabil (pertahankan 1.2x - 1.5x).\n"
         return msg
 
     # ==========================
@@ -933,8 +933,21 @@ if uploaded_file:
                     year_range = f"{int(min_year)} - {int(max_year)}" if min_year != max_year else f"{int(min_year)}"
                     st.info(f"💡 **Info**: Grafik ini menunjukkan akumulasi penjualan bulanan dari rentang tahun **{year_range}**. Ini membantu Anda melihat pola musiman (Prime Time) bisnis Anda agar bisa menyiapkan stok lebih awal.")
 
-                df['Month'] = df['Tanggal Order'].dt.month_name()
-                monthly = df.groupby('Month')['Total Penjualan'].sum()
+                # ✅ UPDATED: Fixed chronological sorting with Indonesian Labels
+                en_to_id = {
+                    'January': 'Januari', 'February': 'Februari', 'March': 'Maret',
+                    'April': 'April', 'May': 'Mei', 'June': 'Juni',
+                    'July': 'Juli', 'August': 'Agustus', 'September': 'September',
+                    'October': 'Oktober', 'November': 'November', 'December': 'Desember'
+                }
+                month_order_id = [
+                    'Januari', 'Februari', 'Maret', 'April', 'Mei', 'Juni',
+                    'Juli', 'Agustus', 'September', 'Oktober', 'November', 'Desember'
+                ]
+                
+                df['Month_ID'] = df['Tanggal Order'].dt.month_name().map(en_to_id)
+                df['Month_ID'] = pd.Categorical(df['Month_ID'], categories=month_order_id, ordered=True)
+                monthly = df.groupby('Month_ID')['Total Penjualan'].sum().sort_index()
                 st.line_chart(monthly, color=current_theme['accent'])
 
         # TAB 4: CUSTOMERS (ENHANCED)
@@ -1022,16 +1035,54 @@ if uploaded_file:
             if not stats.empty:
                 st.subheader("Stock Health")
                 
-                # ✅ UPDATED: Added Glossary/Legend
-                with st.expander("ℹ️ Glossary: ​​What does this status mean?"):
+                # ✅ UPDATED: Added Glossary/Legend with clearer narrations
+                with st.expander("ℹ️ Glossary: Apa maksud angka-angka ini?"):
                     st.markdown("""
-                    **Level Prioritas:**
-                    - **🔥 High (Star Product)**: Penjualan sangat tinggi. **Rekomendasi**: Dorong iklan dan jaga stok.
-                    - **✅ Medium (Stable)**: Penjualan konsisten. **Rekomendasi**: Pertahankan strategi saat ini.
-                    - **⚠️ Critical (Slow Moving)**: Inventaris tinggi tapi penjualan rendah. **Rekomendasi**: Buat bundle promo atau diskon untuk menghabiskan stok.
+                    **Panduan Penyesuaian Stok (Multiplier):**
+                    - **🔥 High (Star Product)**: Produk ini sangat laku! 
+                        - **2x - 3x**: Artinya, Anda disarankan **menambah stok hingga 2 sampai 3 kali lipat** dari biasanya agar tidak kehabisan (stock-out).
+                    - **✅ Medium (Stable)**: Produk ini penjualannya stabil. 
+                        - **1.2x - 1.5x**: Artinya, cukup jaga stok dengan **tambahan sedikit (20-50%)** sebagai cadangan aman saja.
+                    - **⚠️ Critical (Slow Moving)**: Produk ini jarang laku dan menumpuk di gudang.
+                        - **0.5x**: Artinya, **kurangi stok menjadi setengahnya** dari biasanya. Fokus habiskan stok lama dulu sebelum produksi/beli baru lagi.
                     """)
                 
-                st.dataframe(stats[['Pesanan', 'Qty', 'Recommendation', 'Priority']].style.applymap(lambda x: 'color: red; font-weight: bold;' if x == 'critical' else '', subset=['Priority']), use_container_width=True)
+                # Show dataframe without Stock_Adjustment column (moved below)
+                df_stock_display = stats[['Pesanan', 'Qty', 'Recommendation', 'Priority']].rename(columns={'Qty': 'Qty Terjual'})
+                st.dataframe(df_stock_display.style.applymap(lambda x: 'color: red; font-weight: bold;' if x == 'critical' else '', subset=['Priority']), use_container_width=True)
+
+                # ✅ NEW: Stock Adjustment Summary below table
+                st.markdown("---")
+                st.markdown("##### 📋 Rekomendasi Penyesuaian Stok")
+                c1, c2, c3 = st.columns(3)
+                
+                high_prods = stats[stats['Priority'] == 'high']['Pesanan'].tolist()
+                stable_prods = stats[stats['Priority'] == 'medium']['Pesanan'].tolist()
+                critical_prods = stats[stats['Priority'] == 'critical']['Pesanan'].tolist()
+
+                with c1:
+                    st.success("**🔥 Star (Tambah 2x - 3x)**")
+                    st.caption("Stok harus diperbanyak karena sangat laku.")
+                    if high_prods:
+                        for p in high_prods[:5]: st.write(f"- {p}")
+                        if len(high_prods) > 5: st.caption(f"dan {len(high_prods)-5} lainnya...")
+                    else: st.write("Gak ada produk Star")
+
+                with c2:
+                    st.info("**✅ Stable (Jaga 1.2x - 1.5x)**")
+                    st.caption("Stok cukup aman, tambah sedikit saja.")
+                    if stable_prods:
+                        for p in stable_prods[:5]: st.write(f"- {p}")
+                        if len(stable_prods) > 5: st.caption(f"dan {len(stable_prods)-5} lainnya...")
+                    else: st.write("Gak ada produk stabil")
+
+                with c3:
+                    st.warning("**⚠️ Slow (Kurangi Jadi 0.5x)**")
+                    st.caption("Fokus habiskan stok, jangan beli/buat baru.")
+                    if critical_prods:
+                        for p in critical_prods[:5]: st.write(f"- {p}")
+                        if len(critical_prods) > 5: st.caption(f"dan {len(critical_prods)-5} lainnya...")
+                    else: st.write("Gak ada slow moving")
 
     # --------------------------
     # RIGHT: EXPERT AI PANEL
